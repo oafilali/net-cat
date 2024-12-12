@@ -106,7 +106,6 @@ func handleConnection(conn net.Conn) {
 	defer removeClient(conn)
 
 	fmt.Println("Client connected:", clients[conn])
-	_ := os.WriteFile("log.txt", , 0o644)
 	
 	reader := bufio.NewReader(conn)
 	for {
