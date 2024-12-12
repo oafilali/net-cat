@@ -70,6 +70,8 @@ func handleNewClient(conn net.Conn) {
 		joinMsg := fmt.Sprintf("%s has joined our chat...\n", name)
 		broadcastMessage(conn, joinMsg)
 		go handleConnection(conn)
+	} else {
+		conn.Write([]byte("Network is full, try again later...\n"))
 	}
 }
 
