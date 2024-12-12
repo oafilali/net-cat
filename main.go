@@ -19,6 +19,7 @@ var (
 )
 
 func main() {
+	clearChat()
 	port := getPort()
 	done := make(chan bool)
 	go startServer(port)
@@ -67,6 +68,7 @@ func handleNewClient(conn net.Conn) {
 		clientMutex.Lock()
 		clients[conn] = name
 		clientMutex.Unlock()
+		loadChat(conn)
 		joinMsg := fmt.Sprintf("%s has joined our chat...\n", name)
 		broadcastMessage(conn, joinMsg)
 		go handleConnection(conn)
@@ -107,7 +109,9 @@ func getName(conn net.Conn) string {
 func handleConnection(conn net.Conn) {
 	defer removeClient(conn)
 
-	fmt.Println("Client connected:", clients[conn])
+	msg := fmt.Sprint("Client connected:", clients[conn])
+	fmt.Println(msg)
+	saveChat(msg)
 	
 	reader := bufio.NewReader(conn)
 	for {
@@ -124,7 +128,9 @@ func handleConnection(conn net.Conn) {
 		}
 		message = autocorrector.Input(message)
 		formattedMessage := formatMessage(clients[conn], message)
-		fmt.Printf("Message from %s: %s\n", clients[conn], message)
+		msg := fmt.Sprintf("Message from %s: %s\n", clients[conn], message)
+		fmt.Print(msg)
+		saveChat(msg)
 		broadcastMessage(conn, formattedMessage)
 	}
 }
@@ -149,6 +155,37 @@ func broadcastMessage(sender net.Conn, message string) {
 			log.Printf("Error sending message to %s: %v\n", clients[client], err)
 		}
 	}
+}
+
+func saveChat(message string) {
+	file, err := os.OpenFile("log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        log.Println("Error opening chat log file:", err)
+        return
+    }
+    defer file.Close()
+
+    _, err = file.WriteString(message + "\n")
+    if err != nil {
+        log.Println("Error writing message to chat log file:", err)
+    }
+}
+
+func loadChat(client net.Conn) {
+	chat, err := os.ReadFile("log.txt")
+	if err != nil {
+		log.Println("Error loading the chat", err)
+	}
+	client.Write(chat)
+}
+
+func clearChat() {
+	file, err := os.OpenFile("log.txt", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        log.Println("Error clearing chat log file:", err)
+        return
+    }
+    file.Close()
 }
 
 func errorCheck(msg string, err error) {
