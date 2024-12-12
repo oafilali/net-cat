@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"github.com/jroimartin/gocui"
+	"net-cat/autocorrector"
 )
 
 var (
@@ -20,6 +22,7 @@ func main() {
 	port := getPort()
 	done := make(chan bool)
 	go startServer(port)
+	go startGui()
 	<-done
 }
 
@@ -55,18 +58,19 @@ func startServer(port string) {
 }
 
 func handleNewClient(conn net.Conn) {
-	conn.Write([]byte("Welcome to TCP-Chat!\n"))
-	linuxlogo, err := os.ReadFile("linuxlogo.txt")
-	errorCheck("Error reading linux logo:", err)
-	conn.Write(linuxlogo)
-	name := getName(conn)
-	clientMutex.Lock()
-	clients[conn] = name
-	clientMutex.Unlock()
-
-	joinMsg := fmt.Sprintf("%s has joined our chat...\n", name)
-	broadcastMessage(conn, joinMsg)
-	go handleConnection(conn)
+	if len(clients) < 10 {
+		conn.Write([]byte("Welcome to TCP-Chat!\n"))
+		linuxlogo, err := os.ReadFile("linuxlogo.txt")
+		errorCheck("Error reading linux logo:", err)
+		conn.Write(linuxlogo)
+		name := getName(conn)
+		clientMutex.Lock()
+		clients[conn] = name
+		clientMutex.Unlock()
+		joinMsg := fmt.Sprintf("%s has joined our chat...\n", name)
+		broadcastMessage(conn, joinMsg)
+		go handleConnection(conn)
+	}
 }
 
 func removeClient(conn net.Conn) {
@@ -102,9 +106,12 @@ func handleConnection(conn net.Conn) {
 	defer removeClient(conn)
 
 	fmt.Println("Client connected:", clients[conn])
-
+	_ := os.WriteFile("log.txt", , 0o644)
+	
 	reader := bufio.NewReader(conn)
 	for {
+		currentTime := time.Now().Format("2006-01-02 15:04:05")
+		conn.Write([]byte(fmt.Sprintf("[%s][%s]:", currentTime, clients[conn])))
 		message, err := reader.ReadString('\n')
 		if err != nil {
 			log.Println("Connection closed:", err)
@@ -114,6 +121,7 @@ func handleConnection(conn net.Conn) {
 		if message == "" {
 			continue
 		}
+		message = autocorrector.Input(message)
 		formattedMessage := formatMessage(clients[conn], message)
 		fmt.Printf("Message from %s: %s\n", clients[conn], message)
 		broadcastMessage(conn, formattedMessage)
@@ -135,7 +143,7 @@ func broadcastMessage(sender net.Conn, message string) {
 		if client == sender {
 			continue
 		}
-		_, err := client.Write([]byte(message + "\n"))
+		_, err := client.Write([]byte(message))
 		if err != nil {
 			log.Printf("Error sending message to %s: %v\n", clients[client], err)
 		}
@@ -147,4 +155,46 @@ func errorCheck(msg string, err error) {
 		log.Println(msg, err)
 		os.Exit(1)
 	}
+}
+
+//trying to implement the terminal ui
+
+func startGui() {
+    g, err := gocui.NewGui(gocui.OutputNormal)
+    if err != nil {
+        log.Panicln(err)
+    }
+    defer g.Close()
+
+    g.SetManagerFunc(layout)
+
+    if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
+        log.Panicln(err)
+    }
+
+    if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
+        log.Panicln(err)
+    }
+}
+
+func layout(g *gocui.Gui) error {
+    maxX, maxY := g.Size()
+    if v, err := g.SetView("log", 0, 0, maxX-1, maxY-3); err != nil {
+        if err != gocui.ErrUnknownView {
+            return err
+        }
+        v.Title = "Log"
+    }
+    if v, err := g.SetView("input", 0, maxY-3, maxX-1, maxY-1); err != nil {
+        if err != gocui.ErrUnknownView {
+            return err
+        }
+        v.Title = "Input"
+        v.Editable = true
+    }
+    return nil
+}
+
+func quit(g *gocui.Gui, v *gocui.View) error {
+    return gocui.ErrQuit
 }
