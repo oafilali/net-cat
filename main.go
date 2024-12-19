@@ -116,7 +116,7 @@ func checkGroupChat(groupName string, conn net.Conn) error {
 	return nil
 }
 
-func addClientToGroup(groupName string, clientId int) {
+func addClientToGroup(groupName string, clientId int) error {
 	// check if client id is already in the group
 	isIntIn := func() bool {
 		for _, v := range groupChats[groupName] {
@@ -130,7 +130,9 @@ func addClientToGroup(groupName string, clientId int) {
 	// only add when it's not
 	if !isIntIn() {
 		groupChats[groupName] = append(groupChats[groupName], clientId)
+		return nil
 	}
+	return errors.New("client already in group")
 }
 
 func addChat(current_group, newGroupName string, conn net.Conn) string {
@@ -159,8 +161,9 @@ func addChat(current_group, newGroupName string, conn net.Conn) string {
 	clientMutex.Lock()
 	id := registerClient(clientName, groupName, conn)
 	// should check
-	addClientToGroup(groupName, id)
+	err := addClientToGroup(groupName, id)
 	clientMutex.Unlock()
+
 	joinMsg := fmt.Sprintf("%s has joined %s...\n", clientName, groupName)
 	///////////////////////////////////
 	clientsArr[id].currActiveGroup = groupName /////////////////
@@ -169,6 +172,9 @@ func addChat(current_group, newGroupName string, conn net.Conn) string {
 	fmt.Println("curr group:", clientsArr[id].currActiveGroup)
 
 	c = getClientByConn(conn)
+	if err == nil {
+		loadChat(c.conn, groupName)
+	}
 	if conv, ok := c.pendingConv[groupName]; ok {
 		conn.Write([]byte(conv))
 		delete(c.pendingConv, groupName)
@@ -284,8 +290,8 @@ func saveChat(message, chatName string) {
 	}
 }
 
-func loadChat(client net.Conn) {
-	chat, err := os.ReadFile("log.txt")
+func loadChat(client net.Conn, chatName string) {
+	chat, err := os.ReadFile(chatName + "_chat.txt")
 	if err != nil {
 		log.Println("Error loading the chat", err)
 	}
