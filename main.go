@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net-cat/autocorrector"
+	"net-cat/basic"
 	"os"
 	"strings"
 	"sync"
 	"time"
-	"github.com/jroimartin/gocui"
-	"net-cat/autocorrector"
 )
 
 var (
-	clients     = make(map[net.Conn]string)
+	// groupChats  = make(map[string]map[net.Conn]client)
+	groupChats  = make(map[string][]int)
 	clientMutex sync.Mutex
 )
 
@@ -23,7 +24,6 @@ func main() {
 	port := getPort()
 	done := make(chan bool)
 	go startServer(port)
-	go startGui()
 	<-done
 }
 
@@ -59,33 +59,61 @@ func startServer(port string) {
 }
 
 func handleNewClient(conn net.Conn) {
-	if len(clients) < 10 {
-		conn.Write([]byte("Welcome to TCP-Chat!\n"))
-		linuxlogo, err := os.ReadFile("linuxlogo.txt")
-		errorCheck("Error reading linux logo:", err)
-		conn.Write(linuxlogo)
-		name := getName(conn)
-		clientMutex.Lock()
-		clients[conn] = name
-		clientMutex.Unlock()
-		loadChat(conn)
-		joinMsg := fmt.Sprintf("%s has joined our chat...\n", name)
-		broadcastMessage(conn, joinMsg)
-		go handleConnection(conn)
-	} else {
-		conn.Write([]byte("Network is full, try again later...\n"))
-	}
+	conn.Write([]byte("If you want to add/join a group chat you can do so by:\n:@chat: <name of group chat>\n\nIf you want to exit the current group chat you simply type exit\nBy default you'll be added to the global chat unless it's full\n\n"))
+	// if len(groupChats["global"]) < 10 {
+	// 	conn.Write([]byte("Welcome to the Global Chat!\n"))
+	// 	linuxlogo, err := os.ReadFile("linuxlogo.txt")
+	// 	errorCheck("Error reading linux logo:", err)
+	// 	conn.Write(linuxlogo)
+	// 	name := getName(conn)
+	// 	clientMutex.Lock()
+	// 	groupChats["global"][conn] = name
+	// 	clientMutex.Unlock()
+	// 	loadChat(conn)
+	// 	joinMsg := fmt.Sprintf("%s has joined our chat...\n", name)
+	// 	broadcastMessage("global", conn, joinMsg)
+	// } else {
+	// 	conn.Write([]byte("Network is full, try again later...\n"))
+	// }
+	go handleConnection(conn)
 }
 
-func removeClient(conn net.Conn) {
-	clientMutex.Lock()
-	name := clients[conn]
-	delete(clients, conn)
-	clientMutex.Unlock()
-	leaveMsg := fmt.Sprintf("%s has left our chat...\n", name)
-	broadcastMessage(conn, leaveMsg)
-	conn.Close()
-	log.Printf("Client %s disconnected", name)
+// func removeClient(conn net.Conn) {
+// 	clientMutex.Lock()
+// 	name := clients[conn]
+// 	delete(clients, conn)
+// 	clientMutex.Unlock()
+// 	leaveMsg := fmt.Sprintf("%s has left our chat...\n", name)
+// 	broadcastMessage(conn, leaveMsg)
+// 	conn.Close()
+// 	log.Printf("Client %s disconnected", name)
+// }
+
+func removeClient(conn net.Conn, currentGroup string) {
+	if currentGroup != "" {
+		clientMutex.Lock()
+		var name string
+		for i, clientId := range groupChats[currentGroup] {
+			c := getClientById(clientId)
+			if c.conn == conn {
+				// c = nil
+				groupChats[currentGroup][i], groupChats[currentGroup][len(groupChats[currentGroup])-1] = groupChats[currentGroup][len(groupChats[currentGroup])-1], groupChats[currentGroup][i]
+				groupChats[currentGroup] = groupChats[currentGroup][:len(groupChats[currentGroup])-1]
+				// needs to check if the connection is not present in any 
+				// other group to then just close the connection
+				break
+			}
+		}
+		clientMutex.Unlock()
+		leaveMsg := fmt.Sprintf("%s has left our chat...\n", name)
+		broadcastMessage(currentGroup, conn, leaveMsg)
+		if currentGroupName(conn) == "" {
+			c := getClientByConn(conn)
+			c.conn.Close()
+			c = nil
+			log.Printf("Client %s disconnected", name)
+		}
+	}
 }
 
 func getName(conn net.Conn) string {
@@ -106,32 +134,93 @@ func getName(conn net.Conn) string {
 	}
 }
 
-func handleConnection(conn net.Conn) {
-	defer removeClient(conn)
+func addChat(current_group, newGroupName string, conn net.Conn) string {
+	groupName := newGroupName
+	_, ok := groupChats[groupName]
+	if !ok {
+		groupChats[groupName] = []int{}
+	} else if len(groupChats[groupName]) >= 10 {
+		conn.Write([]byte(groupName + " is full, try again later...\n"))
+		return current_group
+	}
+	conn.Write([]byte("Welcome to " + groupName + " Chat!\n"))
+	if groupName == "global" {
+		linuxlogo, err := os.ReadFile("linuxlogo.txt")
+		errorCheck("Error reading linux logo:", err)
+		conn.Write(linuxlogo)
+	} else {
+		conn.Write([]byte(basic.Basic(autocorrector.Capitalize(groupName), "standard")))
+	}
+	name := getName(conn)
+	clientMutex.Lock()
+	id := addClient(name, groupName, conn)
+	// should check
+	groupChats[groupName] = append(groupChats[groupName], id)
+	clientMutex.Unlock()
+	joinMsg := fmt.Sprintf("%s has joined %s...\n", name, groupName)
+	///////////////////////////////////
+	clientsArr[id].currActiveGroup = groupName /////////////////
+	///////////////////////////////
+	broadcastMessage(groupName, conn, joinMsg)
+	fmt.Println("curr group:", clientsArr[id].currActiveGroup)
+	return groupName
+}
 
-	msg := fmt.Sprint("Client connected:", clients[conn])
-	fmt.Println(msg)
-	saveChat(msg)
-	
+func welcomeBackTo(groupName string, conn net.Conn) {
+	conn.Write([]byte("Welcome back to " + groupName + "\n"))
+	conn.Write([]byte(basic.Basic(autocorrector.Capitalize(groupName), "standard")))
+}
+
+func currentGroupName(conn net.Conn) string {
+	for groupName, clients := range groupChats {
+		for _, clientId := range clients {
+			if getClientById(clientId).conn == conn {
+				return groupName
+			}
+		}
+	}
+	return ""
+}
+
+func handleConnection(conn net.Conn) {
+	// defer removeClient(conn)
+
+	// msg := fmt.Sprintln("Client connected:", clients[conn])
+	// fmt.Println(msg)
+	// saveChat(msg)
+
+	currentGroup := addChat("", "global", conn)
 	reader := bufio.NewReader(conn)
 	for {
-		currentTime := time.Now().Format("2006-01-02 15:04:05")
-		conn.Write([]byte(fmt.Sprintf("[%s][%s]:", currentTime, clients[conn])))
 		message, err := reader.ReadString('\n')
 		if err != nil {
 			log.Println("Connection closed:", err)
 			return
 		}
 		message = strings.TrimSpace(message)
-		if message == "" {
+		if len(message) > 8 && message[0:8] == ":@chat: " {
+			currentGroup = addChat(currentGroup, message[8:], conn)
 			continue
 		}
+		if currentGroup == "" || message == "" {
+			continue
+		}
+		if message == ":@exit:" {
+			removeClient(conn, currentGroup)
+			currentGroup = currentGroupName(conn)
+			if currentGroup == "" {
+				break
+			} else {
+				welcomeBackTo(currentGroup, conn)
+				continue
+			}
+		}
 		message = autocorrector.Input(message)
-		formattedMessage := formatMessage(clients[conn], message)
-		msg := fmt.Sprintf("Message from %s: %s\n", clients[conn], message)
+		formattedMessage := formatMessage(getClientByConn(conn).name, message)
+		msg := fmt.Sprintf("Message in %s from %s: %s\n", currentGroup, getClientByConn(conn).name, message)
 		fmt.Print(msg)
-		saveChat(msg)
-		broadcastMessage(conn, formattedMessage)
+		saveChat(formattedMessage, currentGroup)
+		broadcastMessage(currentGroup, conn, formattedMessage)
 	}
 }
 
@@ -143,32 +232,35 @@ func formatMessage(name, message string) string {
 	return fmt.Sprintf("[%s][%s]:%s\n", currentTime, name, message)
 }
 
-func broadcastMessage(sender net.Conn, message string) {
+func broadcastMessage(brGroupName string, sender net.Conn, message string) {
 	clientMutex.Lock()
 	defer clientMutex.Unlock()
-	for client := range clients {
-		if client == sender {
-			continue
+	for _, clientId := range groupChats[brGroupName] {
+		c := getClientById(clientId)
+		if c == nil {
+			log.Fatal("SOMETHING IS WRONG\n", clientId)
 		}
-		_, err := client.Write([]byte(message))
-		if err != nil {
-			log.Printf("Error sending message to %s: %v\n", clients[client], err)
+		if c.currActiveGroup == brGroupName {
+			_, err := c.conn.Write([]byte(message))
+			if err != nil {
+				log.Printf("Error sending message to %s: %v\n", c.name, err)
+			}
 		}
 	}
 }
 
-func saveChat(message string) {
-	file, err := os.OpenFile("log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-    if err != nil {
-        log.Println("Error opening chat log file:", err)
-        return
-    }
-    defer file.Close()
+func saveChat(message, chatName string) {
+	file, err := os.OpenFile(chatName+"_chat.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Println("Error opening chat log file:", err)
+		return
+	}
+	defer file.Close()
 
-    _, err = file.WriteString(message + "\n")
-    if err != nil {
-        log.Println("Error writing message to chat log file:", err)
-    }
+	_, err = file.WriteString(message)
+	if err != nil {
+		log.Println("Error writing message to chat log file:", err)
+	}
 }
 
 func loadChat(client net.Conn) {
@@ -181,11 +273,20 @@ func loadChat(client net.Conn) {
 
 func clearChat() {
 	file, err := os.OpenFile("log.txt", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
-    if err != nil {
-        log.Println("Error clearing chat log file:", err)
-        return
-    }
-    file.Close()
+	if err != nil {
+		log.Println("Error clearing chat log file:", err)
+		return
+	}
+	file.Close()
+
+	for chatName := range groupChats {
+		file, err := os.OpenFile(chatName+"_chat.txt", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Println("Error clearing chat log file:", err)
+			return
+		}
+		file.Close()
+	}
 }
 
 func errorCheck(msg string, err error) {
@@ -193,46 +294,4 @@ func errorCheck(msg string, err error) {
 		log.Println(msg, err)
 		os.Exit(1)
 	}
-}
-
-//trying to implement the terminal ui
-
-func startGui() {
-    g, err := gocui.NewGui(gocui.OutputNormal)
-    if err != nil {
-        log.Panicln(err)
-    }
-    defer g.Close()
-
-    g.SetManagerFunc(layout)
-
-    if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
-        log.Panicln(err)
-    }
-
-    if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
-        log.Panicln(err)
-    }
-}
-
-func layout(g *gocui.Gui) error {
-    maxX, maxY := g.Size()
-    if v, err := g.SetView("log", 0, 0, maxX-1, maxY-3); err != nil {
-        if err != gocui.ErrUnknownView {
-            return err
-        }
-        v.Title = "Log"
-    }
-    if v, err := g.SetView("input", 0, maxY-3, maxX-1, maxY-1); err != nil {
-        if err != gocui.ErrUnknownView {
-            return err
-        }
-        v.Title = "Input"
-        v.Editable = true
-    }
-    return nil
-}
-
-func quit(g *gocui.Gui, v *gocui.View) error {
-    return gocui.ErrQuit
 }
