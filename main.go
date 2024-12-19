@@ -14,7 +14,6 @@ import (
 )
 
 var (
-	// groupChats  = make(map[string]map[net.Conn]client)
 	groupChats  = make(map[string][]int)
 	clientMutex sync.Mutex
 )
@@ -60,47 +59,18 @@ func startServer(port string) {
 
 func handleNewClient(conn net.Conn) {
 	conn.Write([]byte("If you want to add/join a group chat you can do so by:\n:@chat: <name of group chat>\n\nIf you want to exit the current group chat you simply type exit\nBy default you'll be added to the global chat unless it's full\n\n"))
-	// if len(groupChats["global"]) < 10 {
-	// 	conn.Write([]byte("Welcome to the Global Chat!\n"))
-	// 	linuxlogo, err := os.ReadFile("linuxlogo.txt")
-	// 	errorCheck("Error reading linux logo:", err)
-	// 	conn.Write(linuxlogo)
-	// 	name := getName(conn)
-	// 	clientMutex.Lock()
-	// 	groupChats["global"][conn] = name
-	// 	clientMutex.Unlock()
-	// 	loadChat(conn)
-	// 	joinMsg := fmt.Sprintf("%s has joined our chat...\n", name)
-	// 	broadcastMessage("global", conn, joinMsg)
-	// } else {
-	// 	conn.Write([]byte("Network is full, try again later...\n"))
-	// }
 	go handleConnection(conn)
 }
-
-// func removeClient(conn net.Conn) {
-// 	clientMutex.Lock()
-// 	name := clients[conn]
-// 	delete(clients, conn)
-// 	clientMutex.Unlock()
-// 	leaveMsg := fmt.Sprintf("%s has left our chat...\n", name)
-// 	broadcastMessage(conn, leaveMsg)
-// 	conn.Close()
-// 	log.Printf("Client %s disconnected", name)
-// }
 
 func removeClient(conn net.Conn, currentGroup string) {
 	if currentGroup != "" {
 		clientMutex.Lock()
-		var name string
+		var name string = getClientByConn(conn).name
 		for i, clientId := range groupChats[currentGroup] {
 			c := getClientById(clientId)
 			if c.conn == conn {
-				// c = nil
 				groupChats[currentGroup][i], groupChats[currentGroup][len(groupChats[currentGroup])-1] = groupChats[currentGroup][len(groupChats[currentGroup])-1], groupChats[currentGroup][i]
 				groupChats[currentGroup] = groupChats[currentGroup][:len(groupChats[currentGroup])-1]
-				// needs to check if the connection is not present in any 
-				// other group to then just close the connection
 				break
 			}
 		}
@@ -135,6 +105,7 @@ func getName(conn net.Conn) string {
 }
 
 func addChat(current_group, newGroupName string, conn net.Conn) string {
+	var clientName string
 	groupName := newGroupName
 	_, ok := groupChats[groupName]
 	if !ok {
@@ -151,13 +122,17 @@ func addChat(current_group, newGroupName string, conn net.Conn) string {
 	} else {
 		conn.Write([]byte(basic.Basic(autocorrector.Capitalize(groupName), "standard")))
 	}
-	name := getName(conn)
+	if c := getClientByConn(conn); c == nil {
+		clientName = getName(conn)
+	} else {
+		clientName = c.name
+	}
 	clientMutex.Lock()
-	id := addClient(name, groupName, conn)
+	id := addClient(clientName, groupName, conn)
 	// should check
 	groupChats[groupName] = append(groupChats[groupName], id)
 	clientMutex.Unlock()
-	joinMsg := fmt.Sprintf("%s has joined %s...\n", name, groupName)
+	joinMsg := fmt.Sprintf("%s has joined %s...\n", clientName, groupName)
 	///////////////////////////////////
 	clientsArr[id].currActiveGroup = groupName /////////////////
 	///////////////////////////////
@@ -168,7 +143,13 @@ func addChat(current_group, newGroupName string, conn net.Conn) string {
 
 func welcomeBackTo(groupName string, conn net.Conn) {
 	conn.Write([]byte("Welcome back to " + groupName + "\n"))
-	conn.Write([]byte(basic.Basic(autocorrector.Capitalize(groupName), "standard")))
+	if groupName != "global" {
+		conn.Write([]byte(basic.Basic(autocorrector.Capitalize(groupName), "standard")))
+	} else {
+		linuxlogo, err := os.ReadFile("linuxlogo.txt")
+		errorCheck("Error reading linux logo:", err)
+		conn.Write(linuxlogo)
+	}
 }
 
 func currentGroupName(conn net.Conn) string {
@@ -183,12 +164,6 @@ func currentGroupName(conn net.Conn) string {
 }
 
 func handleConnection(conn net.Conn) {
-	// defer removeClient(conn)
-
-	// msg := fmt.Sprintln("Client connected:", clients[conn])
-	// fmt.Println(msg)
-	// saveChat(msg)
-
 	currentGroup := addChat("", "global", conn)
 	reader := bufio.NewReader(conn)
 	for {
@@ -240,7 +215,7 @@ func broadcastMessage(brGroupName string, sender net.Conn, message string) {
 		if c == nil {
 			log.Fatal("SOMETHING IS WRONG\n", clientId)
 		}
-		if c.currActiveGroup == brGroupName {
+		if c.currActiveGroup == brGroupName && c.conn != sender {
 			_, err := c.conn.Write([]byte(message))
 			if err != nil {
 				log.Printf("Error sending message to %s: %v\n", c.name, err)
