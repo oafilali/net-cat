@@ -5,10 +5,12 @@ import (
 	"net"
 )
 
+// pendingConversation is mapping the group name to the conversation string
 type client struct {
 	name            string
 	currActiveGroup string
 	conn            net.Conn
+	pendingConv     map[string]string
 }
 
 type clients []client
@@ -24,7 +26,7 @@ func isClientIn(conn net.Conn) bool {
 	return false
 }
 
-func addClient(name, currGroup string, conn net.Conn) int {
+func registerClient(name, currGroup string, conn net.Conn) int {
 	if isClientIn(conn) {
 		log.Println("Can't add client. It's already in.")
 		return getClientId(conn)
@@ -33,6 +35,7 @@ func addClient(name, currGroup string, conn net.Conn) int {
 		name:            name,
 		currActiveGroup: currGroup,
 		conn:            conn,
+		pendingConv:     make(map[string]string),
 	})
 	return len(clientsArr) - 1
 }

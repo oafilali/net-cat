@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -104,16 +105,41 @@ func getName(conn net.Conn) string {
 	}
 }
 
-func addChat(current_group, newGroupName string, conn net.Conn) string {
-	var clientName string
-	groupName := newGroupName
+func checkGroupChat(groupName string, conn net.Conn) error {
 	_, ok := groupChats[groupName]
 	if !ok {
 		groupChats[groupName] = []int{}
 	} else if len(groupChats[groupName]) >= 10 {
 		conn.Write([]byte(groupName + " is full, try again later...\n"))
+		return errors.New("group is full")
+	}
+	return nil
+}
+
+func addClientToGroup(groupName string, clientId int) {
+	// check if client id is already in the group
+	isIntIn := func() bool {
+		for _, v := range groupChats[groupName] {
+			if v == clientId {
+				return true
+			}
+		}
+		return false
+	}
+
+	// only add when it's not
+	if !isIntIn() {
+		groupChats[groupName] = append(groupChats[groupName], clientId)
+	}
+}
+
+func addChat(current_group, newGroupName string, conn net.Conn) string {
+	var clientName string
+	groupName := newGroupName
+	if checkGroupChat(groupName, conn) != nil {
 		return current_group
 	}
+
 	conn.Write([]byte("Welcome to " + groupName + " Chat!\n"))
 	if groupName == "global" {
 		linuxlogo, err := os.ReadFile("linuxlogo.txt")
@@ -122,15 +148,18 @@ func addChat(current_group, newGroupName string, conn net.Conn) string {
 	} else {
 		conn.Write([]byte(basic.Basic(autocorrector.Capitalize(groupName), "standard")))
 	}
-	if c := getClientByConn(conn); c == nil {
+
+	c := getClientByConn(conn)
+	if c == nil {
 		clientName = getName(conn)
 	} else {
 		clientName = c.name
 	}
+
 	clientMutex.Lock()
-	id := addClient(clientName, groupName, conn)
+	id := registerClient(clientName, groupName, conn)
 	// should check
-	groupChats[groupName] = append(groupChats[groupName], id)
+	addClientToGroup(groupName, id)
 	clientMutex.Unlock()
 	joinMsg := fmt.Sprintf("%s has joined %s...\n", clientName, groupName)
 	///////////////////////////////////
@@ -138,6 +167,12 @@ func addChat(current_group, newGroupName string, conn net.Conn) string {
 	///////////////////////////////
 	broadcastMessage(groupName, conn, joinMsg)
 	fmt.Println("curr group:", clientsArr[id].currActiveGroup)
+
+	c = getClientByConn(conn)
+	if conv, ok := c.pendingConv[groupName]; ok {
+		conn.Write([]byte(conv))
+		delete(c.pendingConv, groupName)
+	}
 	return groupName
 }
 
@@ -149,6 +184,11 @@ func welcomeBackTo(groupName string, conn net.Conn) {
 		linuxlogo, err := os.ReadFile("linuxlogo.txt")
 		errorCheck("Error reading linux logo:", err)
 		conn.Write(linuxlogo)
+	}
+	c := getClientByConn(conn)
+	if conv, ok := c.pendingConv[groupName]; ok {
+		conn.Write([]byte(conv))
+		delete(c.pendingConv, groupName)
 	}
 }
 
@@ -215,12 +255,18 @@ func broadcastMessage(brGroupName string, sender net.Conn, message string) {
 		if c == nil {
 			log.Fatal("SOMETHING IS WRONG\n", clientId)
 		}
-		if c.currActiveGroup == brGroupName && c.conn != sender {
+		if c.conn == sender {
+			continue
+		}
+		if c.currActiveGroup == brGroupName {
 			_, err := c.conn.Write([]byte(message))
 			if err != nil {
 				log.Printf("Error sending message to %s: %v\n", c.name, err)
 			}
+		} else {
+			c.pendingConv[brGroupName] += message
 		}
+
 	}
 }
 
