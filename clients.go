@@ -17,7 +17,7 @@ type clients []client
 
 var clientsArr clients
 
-func isClientIn(conn net.Conn) bool {
+func isClientInClientsArr(conn net.Conn) bool {
 	for _, c := range clientsArr {
 		if c.conn == conn {
 			return true
@@ -27,7 +27,7 @@ func isClientIn(conn net.Conn) bool {
 }
 
 func registerClient(name, currGroup string, conn net.Conn) int {
-	if isClientIn(conn) {
+	if isClientInClientsArr(conn) {
 		log.Println("Can't register client. It's already in.")
 		return getClientId(conn)
 	}
@@ -63,4 +63,13 @@ func getClientId(conn net.Conn) int {
 		}
 	}
 	return -1
+}
+
+func isDuplicateName(name string) bool {
+	for _, v := range clientsArr {
+		if v.name == name {
+			return true
+		}
+	}
+	return false
 }

@@ -59,7 +59,7 @@ func startServer(port string) {
 }
 
 func handleNewClient(conn net.Conn) {
-	conn.Write([]byte("If you want to add/join a group chat you can do so by:\n:@chat: <name of group chat>\n\nIf you want to exit the current group chat you simply type :@exit:\nBy default you'll be added to the global chat unless it's full\n\n"))
+	conn.Write([]byte("If you want to add/join a group chat you can do so by:\n:chat: <name of group chat>\n\nIf you want to exit the current group chat you simply type :exit:\nBy default you'll be added to the global chat unless it's full\n\n"))
 	go handleConnection(conn)
 }
 
@@ -98,6 +98,11 @@ func getName(conn net.Conn) string {
 			continue
 		}
 		name = strings.TrimSpace(name)
+		if isDuplicateName(name) {
+			conn.Write([]byte("NAME IS TAKEN\n"))
+			conn.Write([]byte("[ENTER ANOTHER NAME]: "))
+			continue
+		}
 		if name != "" {
 			return name
 		}
@@ -110,27 +115,31 @@ func checkGroupChat(groupName string, conn net.Conn) error {
 	_, ok := groupChats[groupName]
 	if !ok {
 		groupChats[groupName] = []int{}
-	} else if len(groupChats[groupName]) >= 10 {
+	} else if c := getClientByConn(conn); c != nil && groupName == c.currActiveGroup {
+		conn.Write([]byte("YOU'RE ALREADY IN " + groupName + "\n"))
+		return errors.New("client already in group")
+	} else if len(groupChats[groupName]) == 10 {
 		conn.Write([]byte(groupName + " is full, try again later...\n"))
 		return errors.New("group is full")
 	}
 	return nil
 }
 
-// adds
+func isClientInGroup(groupName string, clientId int) bool {
+	for _, id := range groupChats[groupName] {
+		if id == clientId {
+			return true
+		}
+	}
+	return false
+}
+
+// returns bool value whether it has added client to group or not
 func addClientToGroup(groupName string, clientId int) bool {
 	// check if client id is already in the group
-	isIntIn := func() bool {
-		for _, id := range groupChats[groupName] {
-			if id == clientId {
-				return true
-			}
-		}
-		return false
-	}
 
 	// if the client is already in group
-	if isIntIn() {
+	if isClientInGroup(groupName, clientId) {
 		return false
 	}
 
@@ -218,14 +227,14 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 		message = strings.TrimSpace(message)
-		if len(message) > 8 && message[0:8] == ":@chat: " {
-			joinChat(strings.TrimSpace(message[8:]), conn)
+		if len(message) > 8 && message[0:7] == ":chat: " {
+			joinChat(strings.TrimSpace(message[7:]), conn)
 			continue
 		}
 		if cl.currActiveGroup == "" || message == "" {
 			continue
 		}
-		if message == ":@exit:" {
+		if message == ":exit:" {
 			removeClient(conn, cl.currActiveGroup)
 			cl.currActiveGroup = currentGroupName(conn)
 			if cl.currActiveGroup == "" {
@@ -236,7 +245,7 @@ func handleConnection(conn net.Conn) {
 			}
 		}
 		formattedMessage := formatMessage(cl.name, message)
-		msg := fmt.Sprintf("Message in %s from %s: %s\n", cl.currActiveGroup, getClientByConn(conn).name, message)
+		msg := fmt.Sprintf("Message in %s from %s: %s\n", cl.currActiveGroup, getClientByConn(conn).name, sanitize(message))
 		fmt.Print(msg)
 		saveChat(formattedMessage, cl.currActiveGroup)
 		broadcastMessage(cl.currActiveGroup, conn, formattedMessage)
@@ -247,6 +256,7 @@ func formatMessage(name, message string) string {
 	if message == "" {
 		return ""
 	}
+	message = sanitize(message)
 	currentTime := time.Now().Format("2006-01-02 15:04:05")
 	return fmt.Sprintf("[%s][%s]:%s\n", currentTime, name, message)
 }
@@ -340,4 +350,15 @@ func errorCheck(msg string, err error) {
 
 func cap(s string) string {
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
+}
+
+func sanitize(msg string) string {
+	var s string
+
+	for _, char := range msg {
+		if (char >= 32 && char <= 126) || char == 'ö' || char == 'ä' || char == 'å'  {
+			s += string(char)
+		}
+	}
+	return s
 }
