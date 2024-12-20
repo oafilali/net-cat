@@ -81,7 +81,7 @@ func removeClient(conn net.Conn, currentGroup string) {
 		if currentGroupName(conn) == "" {
 			c := getClientByConn(conn)
 			c.conn.Close()
-			c = nil
+			*c = client{}
 			log.Printf("Client %s disconnected", name)
 		}
 	}
@@ -216,6 +216,33 @@ func currentGroupName(conn net.Conn) string {
 	return ""
 }
 
+func exitClient(conn net.Conn) string {
+	cl := getClientByConn(conn)
+	groupName := cl.currActiveGroup
+	removeClient(conn, groupName)
+	cl.currActiveGroup = currentGroupName(conn)
+	if cl.currActiveGroup == "" {
+		return "EXIT"
+	} else {
+		welcomeBackTo(cl.currActiveGroup, conn)
+		return "CONTINUE"
+	}
+}
+
+func processMessage(msg, currAcGroup string, conn net.Conn) string {
+	if currAcGroup == "" || msg == "" {
+		return "CONTINUE"
+	}
+	if len(msg) > 8 && msg[0:7] == ":chat: " {
+		joinChat(strings.TrimSpace(msg[7:]), conn)
+		return "CONTINUE"
+	}
+	if msg == ":exit:" {
+		return exitClient(conn)
+	}
+	return ""
+}
+
 func handleConnection(conn net.Conn) {
 	joinChat("global", conn)
 	reader := bufio.NewReader(conn)
@@ -227,22 +254,10 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 		message = strings.TrimSpace(message)
-		if len(message) > 8 && message[0:7] == ":chat: " {
-			joinChat(strings.TrimSpace(message[7:]), conn)
+		if p := processMessage(message, cl.currActiveGroup, conn); p == "CONTINUE" {
 			continue
-		}
-		if cl.currActiveGroup == "" || message == "" {
-			continue
-		}
-		if message == ":exit:" {
-			removeClient(conn, cl.currActiveGroup)
-			cl.currActiveGroup = currentGroupName(conn)
-			if cl.currActiveGroup == "" {
-				break
-			} else {
-				welcomeBackTo(cl.currActiveGroup, conn)
-				continue
-			}
+		} else if p == "EXIT" {
+			break
 		}
 		formattedMessage := formatMessage(cl.name, message)
 		msg := fmt.Sprintf("Message in %s from %s: %s\n", cl.currActiveGroup, getClientByConn(conn).name, sanitize(message))
@@ -356,7 +371,7 @@ func sanitize(msg string) string {
 	var s string
 
 	for _, char := range msg {
-		if (char >= 32 && char <= 126) || char == 'ö' || char == 'ä' || char == 'å'  {
+		if (char >= 32 && char <= 126) || char == 'ö' || char == 'ä' || char == 'å' {
 			s += string(char)
 		}
 	}
