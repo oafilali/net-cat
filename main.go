@@ -80,8 +80,8 @@ func removeClient(conn net.Conn, currentGroup string) {
 		broadcastMessage(currentGroup, conn, leaveMsg)
 		if currentGroupName(conn) == "" {
 			c := getClientByConn(conn)
-			*c = client{}
 			c.conn.Close()
+			*c = client{}
 			log.Printf("Client %s disconnected", name)
 		}
 	}
@@ -233,8 +233,12 @@ func processMessage(msg, currAcGroup string, conn net.Conn) string {
 	if currAcGroup == "" || msg == "" {
 		return "CONTINUE"
 	}
-	if len(msg) > 8 && msg[0:7] == ":chat: " {
-		joinChat(strings.TrimSpace(msg[7:]), conn)
+	if len(msg) > 7 && msg[0:7] == ":chat: " {
+		if len(msg) == 8 {
+			conn.Write([]byte("INVALID CHAT NAME, MINIMUM 2 CHARACTERS\n"))
+		} else {
+			joinChat(strings.TrimSpace(msg[7:]), conn)
+		}
 		return "CONTINUE"
 	}
 	if msg == ":exit:" {
