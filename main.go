@@ -80,8 +80,8 @@ func removeClient(conn net.Conn, currentGroup string) {
 		broadcastMessage(currentGroup, conn, leaveMsg)
 		if currentGroupName(conn) == "" {
 			c := getClientByConn(conn)
-			c.conn.Close()
 			*c = client{}
+			c.conn.Close()
 			log.Printf("Client %s disconnected", name)
 		}
 	}
