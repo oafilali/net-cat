@@ -20,6 +20,7 @@ var (
 )
 
 func main() {
+	deleteChatFiles()
 	clearChat()
 	port := getPort()
 	done := make(chan bool)
@@ -59,7 +60,7 @@ func startServer(port string) {
 }
 
 func handleNewClient(conn net.Conn) {
-	conn.Write([]byte("If you want to add/join a group chat you can do so by:\n:@chat: <name of group chat>\n\nIf you want to exit the current group chat you simply type exit\nBy default you'll be added to the global chat unless it's full\n\n"))
+	conn.Write([]byte("If you want to add/join a group chat you can do so by:\n:@chat: <name of group chat>\n\nIf you want to exit the current group chat you simply type :@exit:\nBy default you'll be added to the global chat unless it's full\n\n"))
 	go handleConnection(conn)
 }
 
@@ -135,11 +136,13 @@ func addClientToGroup(groupName string, clientId int) error {
 	return errors.New("client already in group")
 }
 
-func addChat(current_group, newGroupName string, conn net.Conn) string {
+// addChat adds conn to the new group, and if it's the first time joining a group
+// it registers the conn in the clientsArr
+func addChat(current_group, newGroupName string, conn net.Conn) {
 	var clientName string
 	groupName := newGroupName
 	if checkGroupChat(groupName, conn) != nil {
-		return current_group
+		return
 	}
 
 	conn.Write([]byte("Welcome to " + groupName + " Chat!\n"))
@@ -160,16 +163,13 @@ func addChat(current_group, newGroupName string, conn net.Conn) string {
 
 	clientMutex.Lock()
 	id := registerClient(clientName, groupName, conn)
-	// should check
 	err := addClientToGroup(groupName, id)
+	clientsArr[id].currActiveGroup = groupName
 	clientMutex.Unlock()
 
 	joinMsg := fmt.Sprintf("%s has joined %s...\n", clientName, groupName)
-	///////////////////////////////////
-	clientsArr[id].currActiveGroup = groupName /////////////////
-	///////////////////////////////
+	clientsArr[id].currActiveGroup = groupName
 	broadcastMessage(groupName, conn, joinMsg)
-	fmt.Println("curr group:", clientsArr[id].currActiveGroup)
 
 	c = getClientByConn(conn)
 	if err == nil {
@@ -179,7 +179,6 @@ func addChat(current_group, newGroupName string, conn net.Conn) string {
 		conn.Write([]byte(conv))
 		delete(c.pendingConv, groupName)
 	}
-	return groupName
 }
 
 func welcomeBackTo(groupName string, conn net.Conn) {
@@ -210,9 +209,10 @@ func currentGroupName(conn net.Conn) string {
 }
 
 func handleConnection(conn net.Conn) {
-	currentGroup := addChat("", "global", conn)
+	addChat("", "global", conn)
 	reader := bufio.NewReader(conn)
 	for {
+	cl := getClientByConn(conn)
 		message, err := reader.ReadString('\n')
 		if err != nil {
 			log.Println("Connection closed:", err)
@@ -220,28 +220,30 @@ func handleConnection(conn net.Conn) {
 		}
 		message = strings.TrimSpace(message)
 		if len(message) > 8 && message[0:8] == ":@chat: " {
-			currentGroup = addChat(currentGroup, message[8:], conn)
+			addChat(cl.currActiveGroup, message[8:], conn)
 			continue
 		}
-		if currentGroup == "" || message == "" {
+		if cl.currActiveGroup == "" || message == "" {
 			continue
 		}
 		if message == ":@exit:" {
-			removeClient(conn, currentGroup)
-			currentGroup = currentGroupName(conn)
-			if currentGroup == "" {
+			removeClient(conn, cl.currActiveGroup)
+			cl.currActiveGroup = currentGroupName(conn)
+			if cl.currActiveGroup == "" {
 				break
 			} else {
-				welcomeBackTo(currentGroup, conn)
+				welcomeBackTo(cl.currActiveGroup, conn)
 				continue
 			}
 		}
+		// fmt.Println("GROOOOOOOOOOOOOUP NAME 1 :", clientsArr[id].currActiveGroup)
+		fmt.Println("GROOOOOOOOOOOOOUP NAME 2 :", getClientByConn(conn).currActiveGroup)
 		message = autocorrector.Input(message)
 		formattedMessage := formatMessage(getClientByConn(conn).name, message)
-		msg := fmt.Sprintf("Message in %s from %s: %s\n", currentGroup, getClientByConn(conn).name, message)
+		msg := fmt.Sprintf("Message in %s from %s: %s\n", cl.currActiveGroup, getClientByConn(conn).name, message)
 		fmt.Print(msg)
-		saveChat(formattedMessage, currentGroup)
-		broadcastMessage(currentGroup, conn, formattedMessage)
+		saveChat(formattedMessage, cl.currActiveGroup)
+		broadcastMessage(cl.currActiveGroup, conn, formattedMessage)
 	}
 }
 
@@ -277,7 +279,7 @@ func broadcastMessage(brGroupName string, sender net.Conn, message string) {
 }
 
 func saveChat(message, chatName string) {
-	file, err := os.OpenFile(chatName+"_chat.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(chatName+".chat", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Println("Error opening chat log file:", err)
 		return
@@ -291,7 +293,7 @@ func saveChat(message, chatName string) {
 }
 
 func loadChat(client net.Conn, chatName string) {
-	chat, err := os.ReadFile(chatName + "_chat.txt")
+	chat, err := os.ReadFile(chatName + ".chat")
 	if err != nil {
 		log.Println("Error loading the chat", err)
 	}
@@ -313,6 +315,21 @@ func clearChat() {
 			return
 		}
 		file.Close()
+	}
+}
+
+func deleteChatFiles() {
+	entries, err := os.ReadDir("./")
+
+	if err != nil {
+		log.Println(err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() && len(e.Name()) > 5 && e.Name()[len(e.Name())-5:] == ".chat" {
+			fmt.Println(e.Name())
+			err := os.Remove(e.Name())
+			log.Println(err)
+		}
 	}
 }
 

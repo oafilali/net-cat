@@ -28,7 +28,7 @@ func isClientIn(conn net.Conn) bool {
 
 func registerClient(name, currGroup string, conn net.Conn) int {
 	if isClientIn(conn) {
-		log.Println("Can't add client. It's already in.")
+		log.Println("Can't register client. It's already in.")
 		return getClientId(conn)
 	}
 	clientsArr = append(clientsArr, client{
