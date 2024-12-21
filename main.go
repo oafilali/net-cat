@@ -83,7 +83,7 @@ func handleNewClient(conn net.Conn) {
 func removeClient(conn net.Conn, currentGroup string) {
 	if currentGroup != "" {
 		clientMutex.Lock()
-		var name string = getClientByConn(conn).name
+		name := getClientByConn(conn).name
 		for i, clientId := range groupChats[currentGroup] {
 			c := getClientById(clientId)
 			if c.conn == conn {
@@ -166,9 +166,8 @@ func addClientToGroup(groupName string, clientId int) bool {
 
 // addChat adds conn to the new group, and if it's the first time joining a group
 // it registers the conn in the clientsArr
-func joinChat(newGroupName string, conn net.Conn) {
+func joinChat(groupName string, conn net.Conn) {
 	var clientName string
-	groupName := newGroupName
 	if err := checkGroupChat(groupName, conn); err != nil {
 		return
 	}
@@ -324,9 +323,6 @@ func broadcastMessage(brGroupName string, sender net.Conn, message string) {
 		c := getClientById(clientId)
 		if c == nil {
 			log.Fatal("SOMETHING IS WRONG\n", clientId)
-		}
-		if c.conn == sender {
-			continue
 		}
 		if c.currActiveGroup == brGroupName {
 			_, err := c.conn.Write([]byte(message))
