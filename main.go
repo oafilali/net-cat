@@ -73,7 +73,10 @@ func startServer(port string) {
 }
 
 func handleNewClient(conn net.Conn) {
-	conn.Write([]byte(BoldYellow + "\nTo add/join a group chat:\n" + Reset + ":chat: <name of group chat>\n" + BoldYellow + "To change your name:\n" + Reset + ":name: <new name>\n" + BoldYellow + "To exit the current group chat:\n" + Reset + ":exit:\n" + BoldMagenta + "By default, you'll be added to the global chat unless it's full.\n\n" + Reset))
+	conn.Write([]byte(BoldYellow + "\nTo add/join a group chat:\n" + Reset + ":chat: <name of group chat>\n"))
+	conn.Write([]byte(BoldYellow + "To change your name:\n" + Reset + ":name: <new name>\n"))
+	conn.Write([]byte(BoldYellow + "To exit the current group chat:\n" + Reset + ":exit:\n"))
+	conn.Write([]byte(BoldMagenta + "By default, you'll be added to the global chat unless it's full.\n\n" + Reset))
 	go handleConnection(conn)
 }
 
@@ -366,15 +369,6 @@ func clearChat() {
 		return
 	}
 	file.Close()
-
-	for chatName := range groupChats {
-		file, err := os.OpenFile(chatName+"_chat.txt", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Println("Error clearing chat log file:", err)
-			return
-		}
-		file.Close()
-	}
 }
 
 func deleteChatFiles() {
