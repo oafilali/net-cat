@@ -14,6 +14,20 @@ import (
 )
 
 var (
+	Reset       = "\033[0m"
+	Red         = "\033[31m"
+	Green       = "\033[32m"
+	Yellow      = "\033[33m"
+	BoldYellow  = "\033[33;1m"
+	Blue        = "\033[34m"
+	Magenta     = "\033[35m"
+	BoldMagenta = "\033[35;1m"
+	Cyan        = "\033[36m"
+	Gray        = "\033[37m"
+	White       = "\033[97m"
+)
+
+var (
 	groupChats  = make(map[string][]int)
 	clientMutex sync.Mutex
 )
@@ -59,7 +73,7 @@ func startServer(port string) {
 }
 
 func handleNewClient(conn net.Conn) {
-	conn.Write([]byte("If you want to add/join a group chat you can do so by:\n:chat: <name of group chat>\n\nIf you want to exit the current group chat you simply type :exit:\nBy default you'll be added to the global chat unless it's full\n\n"))
+	conn.Write([]byte(BoldYellow + "\nTo add/join a group chat:\n" + Reset + ":chat: <name of group chat>\n" + BoldYellow + "To change your name:\n" + Reset + ":name: <new name>\n" + BoldYellow + "To exit the current group chat:\n" + Reset + ":exit:\n" + BoldMagenta + "By default, you'll be added to the global chat unless it's full.\n\n" + Reset))
 	go handleConnection(conn)
 }
 
@@ -77,7 +91,7 @@ func removeClient(conn net.Conn, currentGroup string) {
 		}
 		clientMutex.Unlock()
 		leaveMsg := fmt.Sprintf("%s has left our chat...\n", name)
-		broadcastMessage(currentGroup, conn, leaveMsg)
+		broadcastMessage(currentGroup, conn, Yellow+leaveMsg+Reset)
 		if currentGroupName(conn) == "" {
 			c := getClientByConn(conn)
 			c.conn.Close()
@@ -99,7 +113,7 @@ func getName(conn net.Conn) string {
 		}
 		name = strings.TrimSpace(name)
 		if isDuplicateName(name) {
-			conn.Write([]byte("NAME IS TAKEN\n"))
+			conn.Write([]byte(Red + "NAME IS TAKEN\n" + Reset))
 			conn.Write([]byte("[ENTER ANOTHER NAME]: "))
 			continue
 		}
@@ -119,7 +133,7 @@ func checkGroupChat(groupName string, conn net.Conn) error {
 		conn.Write([]byte("YOU'RE ALREADY IN " + groupName + "\n"))
 		return errors.New("client already in group")
 	} else if len(groupChats[groupName]) == 10 {
-		conn.Write([]byte(groupName + " is full, try again later...\n"))
+		conn.Write([]byte(BoldMagenta + "Oops, " + groupName + " chat is packed right now! Try again in a bit " + Reset + ":)\n"))
 		return errors.New("group is full")
 	}
 	return nil
@@ -173,7 +187,7 @@ func joinChat(newGroupName string, conn net.Conn) {
 	clientMutex.Unlock()
 
 	joinMsg := fmt.Sprintf("%s has joined %s...\n", clientName, groupName)
-	broadcastMessage(groupName, conn, joinMsg)
+	broadcastMessage(groupName, conn, Magenta+joinMsg+Reset)
 
 	c = getClientByConn(conn)
 	if isAdded {
@@ -229,13 +243,30 @@ func exitClient(conn net.Conn) string {
 	}
 }
 
-func processMessage(msg, currAcGroup string, conn net.Conn) string {
-	if currAcGroup == "" || msg == "" {
+func processMessage(msg string, conn net.Conn) string {
+	cl := getClientByConn(conn)
+
+	if cl != nil && len(msg) > 7 && msg[0:7] == ":name: " {
+		currAcGroup := cl.currActiveGroup
+		newName := msg[7:]
+		if newName == cl.name {
+			conn.Write([]byte(Green + "You're already using that name, aren't you" + Reset + " :)\n"))
+			return "CONTINUE"
+		}
+		if isDuplicateName(newName) {
+			conn.Write([]byte(Red + "NAME IS TAKEN\n" + Reset))
+			return "CONTINUE"
+		}
+		newNameMsg := "Heads up! [" + cl.name + "] is now going by [" + newName + "].\n"
+		saveChat(newNameMsg, currAcGroup)
+		broadcastMessage(currAcGroup, conn, Blue+newNameMsg+Reset)
+		conn.Write([]byte(Green + "You've successfully changed your name\n" + Reset))
+		cl.name = newName
 		return "CONTINUE"
 	}
 	if len(msg) > 7 && msg[0:7] == ":chat: " {
 		if len(msg) == 8 {
-			conn.Write([]byte("INVALID CHAT NAME, MINIMUM 2 CHARACTERS\n"))
+			conn.Write([]byte(Red+"Invalid chat name, 1 character isn't descriptive enough.\n"+Reset))
 		} else {
 			joinChat(strings.TrimSpace(msg[7:]), conn)
 		}
@@ -244,7 +275,10 @@ func processMessage(msg, currAcGroup string, conn net.Conn) string {
 	if msg == ":exit:" {
 		return exitClient(conn)
 	}
-	return ""
+	if cl == nil {
+		return "CONTINUE"
+	}
+	return "Broadcast Message"
 }
 
 func handleConnection(conn net.Conn) {
@@ -258,7 +292,7 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 		message = strings.TrimSpace(message)
-		if p := processMessage(message, cl.currActiveGroup, conn); p == "CONTINUE" {
+		if p := processMessage(message, conn); p == "CONTINUE" {
 			continue
 		} else if p == "EXIT" {
 			break
@@ -351,7 +385,6 @@ func deleteChatFiles() {
 	}
 	for _, e := range entries {
 		if !e.IsDir() && len(e.Name()) > 5 && e.Name()[len(e.Name())-5:] == ".chat" {
-			fmt.Println(e.Name())
 			err := os.Remove(e.Name())
 			if err != nil {
 				log.Println(err)
